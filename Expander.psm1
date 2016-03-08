@@ -48,14 +48,14 @@ function Resolve-Command {
     if(!$Commands) {
       if($match = $AllowedCommand -match "^[^-\\]*\\*$([Regex]::Escape($Name))") {
         $OFS = ", "
-        Write-Verbose "Commands is empty, but AllowedCommand ($AllowedCommand) contains $Name, so:"
+        Write-Debug "Commands is empty, but AllowedCommand ($AllowedCommand) contains $Name, so:"
         $Commands = @(Microsoft.PowerShell.Core\Get-Command $match)
       }
     }
     $cmd = $null
     
     if($Commands) {
-      Write-Verbose "Commands $($Commands|% { $_.ModuleName + '\' + $_.Name })"
+      Write-Debug "Commands $($Commands|% { $_.ModuleName + '\' + $_.Name })"
 
       if($Commands.Count -gt 1) {
         $cmd = @( $Commands | Where-Object { $_.Name -match "^$([Regex]::Escape($Name))" })[0]
@@ -241,20 +241,16 @@ function Expand-Alias {
          Write-Warning "There was an error parsing script (See above). We cannot expand aliases until the script parses without errors."
          return
       }
-      $lastCommand = $Tokens.Count + 1
       :token for($t = $Tokens.Count -1; $t -ge 0; $t--) {
          Write-Verbose "Token $t of $($Tokens.Count)"
          $token = $Tokens[$t]
          switch -Regex ($token.Kind) {
             "Generic|Identifier" {
                 if($token.TokenFlags -eq 'CommandName') {
-                   if($lastCommand -ne $t) {
-                      $OFS = ", "
-                      Write-Verbose "Resolve-Command -Name $Token.Text -AllowedModule $AllowedModule -AllowedCommand @($AllowedCommand)"
-                      $Command = Resolve-Command -Name $Token.Text -AllowedModule $AllowedModule -AllowedCommand $AllowedCommand
-                      if(!$Command) { return $null }
-                   }
-                   Write-Verbose "Unqualified? $Unqualified"
+                   $OFS = ", "
+                   Write-Debug "Resolve-Command -Name $($Token.Text) -AllowedModule $AllowedModule -AllowedCommand @($AllowedCommand)"
+                   $Command = Resolve-Command -Name $Token.Text -AllowedModule $AllowedModule -AllowedCommand $AllowedCommand
+                   if(!$Command) { return $null }
                    if(!$Unqualified -and $Command.ModuleName) { 
                       $CommandName = '{0}\{1}' -f $Command.ModuleName, $Command.Name
                    } else {
@@ -265,33 +261,27 @@ function Expand-Alias {
             }
             "Parameter" {
                # Figure out which command they're talking about
-               Write-Verbose "lastCommand: $lastCommand ($t)"
-               if($lastCommand -ge $t) {
-                  for($c = $t; $c -ge 0; $c--) {
-                    Write-Verbose "c: $($Tokens[$c].Text) ($($Tokens[$c].Kind) and $($Tokens[$c].TokenFlags))"
-
-                     if(("Generic","Identifier" -contains $Tokens[$c].Kind) -and $Tokens[$c].TokenFlags -eq "CommandName" ) {
-                        Write-Verbose "Resolve-Command -Name $($Tokens[$c].Text) -AllowedModule $AllowedModule -AllowedCommand $AllowedCommand"
-                        $Command = Resolve-Command -Name $Tokens[$c].Text -AllowedModule $AllowedModule -AllowedCommand $AllowedCommand
-                        if($Command) {
-                          Write-Verbose "Command: $($Tokens[$c].Text) => $($Command.Name)"
-                        }
-
-                        $global:RCommand = $Command
-                        if(!$Command) { return $null }
-                        $lastCommand = $c
-                        break
-                     }
-                  }
-               }
+               Write-Debug "Parameter: $($Token.Text)"
+               # We need to use the AST for this, but ...
+               # in the case where a colon instead of a space is used to separate -param:value
+               # the token is just -param: but the ast is the -param:value
+               $CommandName = $AST.Find( {
+                  $args[0].Extent.StartOffset -eq $Token.Extent.StartOffset -and `
+                  $args[0] -is [System.Management.Automation.Language.CommandParameterAst] -and `
+                  $args[0].Parent -is [System.Management.Automation.Language.CommandAst]
+                  }, $true ).Parent.GetCommandName()
+               $Command = Resolve-Command -Name $CommandName -AllowedModule $AllowedModule -AllowedCommand $AllowedCommand
+               if($Command) {
+                  Write-Debug "Command: $CommandName => $($Command.Name)"
+               } else { return $null }
             
                $short = "^" + $token.ParameterName
                $parameters = @($Command.ParameterSets | Select-Object -ExpandProperty Parameters | Where-Object {
                                 $_.Name -match $short -or $_.Aliases -match $short
                              } | Select-Object -Unique)
 
-               Write-Verbose "Parameters: $($parameters | Select -Expand Name)"
-               Write-Verbose "Parameters: $($Command.ParameterSets | Select-Object -ExpandProperty Parameters | Select -Expand Name) | ? Name -match $short"
+               Write-Debug "Parameters: $($parameters | Select -Expand Name)"
+               Write-Debug "Parameters: $($Command.ParameterSets | Select-Object -ExpandProperty Parameters | Select -Expand Name) | ? Name -match $short"
                if($parameters.Count -ge 1) {
                   # if("Verbose","Debug","WarningAction","WarningVariable","ErrorAction","ErrorVariable","OutVariable","OutBuffer","WhatIf","Confirm" -contains $parameters[0].Name ) {
                   #    $Script = $Script.Remove( $Token.Extent.StartOffset, ($Token.Extent.EndOffset - $Token.Extent.StartOffset))
@@ -305,7 +295,10 @@ function Expand-Alias {
                         break token
                      }
                   }
-                  $Script = $Script.Remove( $Token.Extent.StartOffset, ($Token.Extent.EndOffset - $Token.Extent.StartOffset)).Insert( $Token.Extent.StartOffset, "-$($parameters[0].Name)" )
+                  $Replacement = $parameters[0].Name
+                  # We need to ensure that if it has ":" instead of space, we preserve that
+                  if($Token.Text.EndsWith(":")) { $Replacement += ":" }
+                  $Script = $Script.Remove( $Token.Extent.StartOffset, ($Token.Extent.EndOffset - $Token.Extent.StartOffset)).Insert( $Token.Extent.StartOffset, "-$Replacement" )
                } else {
                   Write-Warning "Rejecting Non-Parameter: $($token.ParameterName)"
                   # $Script = $Script.Remove( $Token.Extent.StartOffset, ($Token.Extent.EndOffset - $Token.Extent.StartOffset))
