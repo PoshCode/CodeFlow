@@ -12,7 +12,7 @@
 ModuleToProcess = 'Formatting.psm1'
 
 # Version number of this module.
-ModuleVersion = '2.4'
+ModuleVersion = '2.5'
 
 # ID used to uniquely identify this module
 GUID = '99fb1702-0b65-4149-a13d-7f8a2da619b2'
@@ -63,7 +63,7 @@ Description = 'A function for cleaning up scripts by replacing all aliases with 
 # FormatsToProcess = @()
 
 # Modules to import as nested modules of the module specified in RootModule/ModuleToProcess
-NestedModules = @('Parser.psm1', 'Expander.psm1')
+NestedModules = @('Parser.psm1', 'Expander.psm1', 'Utilities.psm1')
 
 # Functions to export from this module
 FunctionsToExport = '*'
@@ -81,7 +81,7 @@ AliasesToExport = '*'
 # ModuleList = @()
 
 # List of all files packaged with this module
-FileList = 'CodeFlow.psd1', 'CodeFlow.psm1'
+FileList = 'CodeFlow.psd1', 'CodeFlow.psm1', 'Parser.psm1', 'Expander.psm1','Utilities.psm1'
 
 # Private data to pass to the module specified in RootModule/ModuleToProcess
 # PrivateData = ''
